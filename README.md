@@ -106,11 +106,18 @@ pip install openrag-sdk
 
 **Quick Example:**
 ```python
+import asyncio
 from openrag_sdk import OpenRAGClient
 
-async with OpenRAGClient() as client:
-    response = await client.chat.create(message="What is RAG?")
-    print(response.response)
+
+async def main():
+    async with OpenRAGClient() as client:
+        response = await client.chat.create(message="What is RAG?")
+        print(response.response)
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
 ```
 
 📖 [Full Python SDK Documentation](https://pypi.org/project/openrag-sdk/)
