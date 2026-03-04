@@ -598,10 +598,29 @@ async def _delete_existing_default_docs(session_manager):
     delete_query = {
         "query": {
             "bool": {
-                "must": [
-                    {"term": {"connector_type": "system_default"}},
-                    {"term": {"owner_email": anonymous_user.email}},
-                ]
+                "should": [
+                    # URL-based default docs are ingested as system_default and
+                    # owned by the anonymous onboarding user.
+                    {
+                        "bool": {
+                            "must": [
+                                {"term": {"connector_type": "system_default"}},
+                                {"term": {"owner_email": anonymous_user.email}},
+                            ]
+                        }
+                    },
+                    # Legacy file-based default docs were ingested as local and
+                    # marked with is_sample_data=true.
+                    {
+                        "bool": {
+                            "must": [
+                                {"term": {"connector_type": "local"}},
+                                {"term": {"is_sample_data": "true"}},
+                            ]
+                        }
+                    },
+                ],
+                "minimum_should_match": 1,
             }
         }
     }
