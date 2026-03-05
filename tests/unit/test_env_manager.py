@@ -105,6 +105,7 @@ class TestSaveEnvFilePermissions:
         assert "OPENRAG_BACKEND_HOST='my-host'" in content
         assert content.count("OPENRAG_BACKEND_HOST=") == 1
         assert "OPENSEARCH_PASSWORD='NewSecurePass!123'" in content
+        assert "OPENSEARCH_PASSWORD='old-password'" not in content
 
 
 # ---------------------------------------------------------------------------

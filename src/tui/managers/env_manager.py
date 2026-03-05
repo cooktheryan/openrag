@@ -120,6 +120,7 @@ class EnvManager:
                     logger.warning(f"Failed to migrate .env file: {e}")
 
         self.config = EnvConfig()
+        self.assignment_pattern = re.compile(r"^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=")
 
     def generate_secure_password(self) -> str:
         """Generate a secure password for OpenSearch."""
@@ -209,7 +210,6 @@ class EnvManager:
             return []
 
         managed_vars = set(self._env_attr_map().keys())
-        assignment_pattern = re.compile(r"^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=")
         preserved_lines: list[str] = []
 
         try:
@@ -218,7 +218,7 @@ class EnvManager:
                 if not stripped or stripped.startswith("#"):
                     continue
 
-                match = assignment_pattern.match(raw_line)
+                match = self.assignment_pattern.match(raw_line)
                 if not match:
                     continue
 
@@ -227,7 +227,10 @@ class EnvManager:
                     continue
                 preserved_lines.append(raw_line)
         except Exception:
-            logger.warning(f"Failed to preserve custom .env lines from {self.env_file}")
+            logger.warning(
+                f"Failed to preserve custom .env lines from {self.env_file}",
+                exc_info=True,
+            )
 
         return preserved_lines
 
