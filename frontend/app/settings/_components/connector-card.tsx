@@ -54,7 +54,7 @@ export default function ConnectorCard({
           <div className="flex flex-col gap-4 mb-2 w-full">
             <div className="flex items-center justify-between mb-1">
               <CardIcon
-                isActive={!!(connector?.available && isConnected)}
+                isActive={!!isConnected}
                 activeBgColor="bg-white"
               >
                 {connector.icon}
@@ -71,7 +71,7 @@ export default function ConnectorCard({
                 {connector.name}
               </CardTitle>
               <CardDescription className="text-sm">
-                {connector?.available
+                {isConnected || connector?.available
                   ? `${connector.name} is configured.`
                   : "Not configured."}
               </CardDescription>
@@ -80,90 +80,82 @@ export default function ConnectorCard({
         </div>
       </CardHeader>
       <CardContent className="flex-1 flex flex-col justify-end space-y-4">
-        {connector?.available ? (
-          <div className="space-y-3">
-            {isConnected ? (
-              <div className="flex gap-2 overflow-hidden w-full">
-                <Button
-                  variant="default"
-                  onClick={() => onNavigateToKnowledge(connector)}
-                  disabled={isDisconnecting || isConnecting}
-                  className="cursor-pointer !text-sm truncate rounded-md"
-                  size="md"
-                >
-                  <Plus className="h-4 w-4" />
-                  <span className="text-mmd truncate">Add Knowledge</span>
-                </Button>
-                {onConfigure ? (
-                  <Button
-                    variant="outline"
-                    onClick={() => onConfigure(connector)}
-                    disabled={isConnecting || isDisconnecting}
-                    className="cursor-pointer"
-                    size="iconMd"
-                    title="Edit configuration"
-                  >
-                    <Settings2 className="h-4 w-4" />
-                  </Button>
-                ) : (
-                  <Button
-                    variant="outline"
-                    onClick={() => onConnect(connector)}
-                    disabled={isConnecting || isDisconnecting}
-                    className="cursor-pointer"
-                    size="iconMd"
-                  >
-                    {isConnecting ? (
-                      <RefreshCcw className="h-4 w-4 animate-spin" />
-                    ) : (
-                      <RefreshCcw className="h-4 w-4" />
-                    )}
-                  </Button>
-                )}
-                <Button
-                  variant="outline"
-                  onClick={() => onDisconnect(connector)}
-                  disabled={isDisconnecting || isConnecting}
-                  className="cursor-pointer text-destructive hover:text-destructive"
-                  size="iconMd"
-                >
-                  {isDisconnecting ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <Trash2 className="h-4 w-4" />
-                  )}
-                </Button>
-              </div>
+        {isConnected ? (
+          <div className="flex gap-2 overflow-hidden w-full">
+            <Button
+              variant="default"
+              onClick={() => onNavigateToKnowledge(connector)}
+              disabled={isDisconnecting || isConnecting}
+              className="cursor-pointer !text-sm truncate rounded-md"
+              size="md"
+            >
+              <Plus className="h-4 w-4" />
+              <span className="text-mmd truncate">Add Knowledge</span>
+            </Button>
+            {onConfigure ? (
+              <Button
+                variant="outline"
+                onClick={() => onConfigure(connector)}
+                disabled={isConnecting || isDisconnecting}
+                className="cursor-pointer"
+                size="iconMd"
+                title="Edit configuration"
+              >
+                <Settings2 className="h-4 w-4" />
+              </Button>
             ) : (
               <Button
-                onClick={() =>
-                  onConfigure ? onConfigure(connector) : onConnect(connector)
-                }
-                disabled={isConnecting}
-                className="w-full cursor-pointer group-hover:bg-background group-hover:border-zinc-700 group-hover:text-primary"
-                size="sm"
+                variant="outline"
+                onClick={() => onConnect(connector)}
+                disabled={isConnecting || isDisconnecting}
+                className="cursor-pointer"
+                size="iconMd"
               >
                 {isConnecting ? (
-                  <>
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                    Connecting...
-                  </>
+                  <RefreshCcw className="h-4 w-4 animate-spin" />
                 ) : (
-                  <>Connect</>
+                  <RefreshCcw className="h-4 w-4" />
                 )}
               </Button>
             )}
+            <Button
+              variant="outline"
+              onClick={() => onDisconnect(connector)}
+              disabled={isDisconnecting || isConnecting}
+              className="cursor-pointer text-destructive hover:text-destructive"
+              size="iconMd"
+            >
+              {isDisconnecting ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Trash2 className="h-4 w-4" />
+              )}
+            </Button>
           </div>
         ) : onConfigure ? (
-          // Connector supports UI-based configuration (e.g. IBM COS)
           <Button
-            variant="outline"
             onClick={() => onConfigure(connector)}
-            className="w-full cursor-pointer"
+            disabled={isConnecting}
+            className="w-full cursor-pointer group-hover:bg-background group-hover:border-zinc-700 group-hover:text-primary"
             size="sm"
           >
-            <Settings2 className="h-4 w-4 mr-2" />
             Configure
+          </Button>
+        ) : connector?.available ? (
+          <Button
+            onClick={() => onConnect(connector)}
+            disabled={isConnecting}
+            className="w-full cursor-pointer group-hover:bg-background group-hover:border-zinc-700 group-hover:text-primary"
+            size="sm"
+          >
+            {isConnecting ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Connecting...
+              </>
+            ) : (
+              <>Connect</>
+            )}
           </Button>
         ) : (
           <div className="text-sm text-muted-foreground">

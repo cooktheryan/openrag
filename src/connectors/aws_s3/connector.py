@@ -51,6 +51,26 @@ class S3Connector(BaseConnector):
     CLIENT_ID_ENV_VAR = "AWS_ACCESS_KEY_ID"
     CLIENT_SECRET_ENV_VAR = "AWS_SECRET_ACCESS_KEY"
 
+    def get_client_id(self) -> str:
+        """Return access key from config dict, or AWS_ACCESS_KEY_ID env var as fallback."""
+        val = self.config.get("access_key") or os.getenv("AWS_ACCESS_KEY_ID")
+        if val:
+            return val
+        raise ValueError(
+            "S3 credentials not set. Provide 'access_key' in the connector config "
+            "or set the AWS_ACCESS_KEY_ID environment variable."
+        )
+
+    def get_client_secret(self) -> str:
+        """Return secret key from config dict, or AWS_SECRET_ACCESS_KEY env var as fallback."""
+        val = self.config.get("secret_key") or os.getenv("AWS_SECRET_ACCESS_KEY")
+        if val:
+            return val
+        raise ValueError(
+            "S3 credentials not set. Provide 'secret_key' in the connector config "
+            "or set the AWS_SECRET_ACCESS_KEY environment variable."
+        )
+
     def __init__(self, config: Dict[str, Any]):
         if config is None:
             config = {}

@@ -211,7 +211,7 @@ function S3BucketView({
   onDone: () => void;
 }) {
   const queryClient = useQueryClient();
-  const { data: buckets, isLoading, refetch } = useS3BucketStatusQuery(
+  const { data: buckets, isLoading, error: bucketsError, refetch } = useS3BucketStatusQuery(
     connector.connectionId,
     { enabled: true },
   );
@@ -320,6 +320,10 @@ function S3BucketView({
         {isLoading ? (
           <div className="flex justify-center py-8">
             <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary" />
+          </div>
+        ) : bucketsError ? (
+          <div className="rounded-lg border border-destructive/50 p-6 text-center text-destructive text-sm">
+            {(bucketsError as Error).message || "Failed to load buckets. Check your S3 credentials and endpoint."}
           </div>
         ) : !buckets?.length ? (
           <div className="rounded-lg border p-6 text-center text-muted-foreground text-sm">
