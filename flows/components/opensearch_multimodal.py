@@ -1663,10 +1663,7 @@ class OpenSearchVectorStoreComponentMultimodalMultiEmbedding(LCVectorStoreCompon
                 # during fallback paths, which can otherwise return broad/unexpected hits.
                 self.log("[FALLBACK] Empty query detected; returning no results.")
                 return {"hits": {"hits": []}}
-            logger.warning(
-                "Falling back to keyword-only OpenSearch retrieval",
-                reason=reason,
-            )
+            logger.warning(f"Falling back to keyword-only OpenSearch retrieval: {reason}")
             self.log(f"[FALLBACK] Keyword-only retrieval: {reason}")
             try:
                 return client.search(
@@ -1822,8 +1819,8 @@ class OpenSearchVectorStoreComponentMultimodalMultiEmbedding(LCVectorStoreCompon
             lowered = error_message.lower()
             if use_num_candidates and "num_candidates" in lowered:
                 logger.warning(
-                    "Retrying search without num_candidates parameter due to cluster capabilities",
-                    error=error_message,
+                    "Retrying search without num_candidates parameter due to cluster capabilities: "
+                    f"{error_message}"
                 )
                 fallback_body = copy.deepcopy(body)
                 try:
