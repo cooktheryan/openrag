@@ -135,7 +135,8 @@ async def ibm_cos_list_buckets(
             cos = create_ibm_cos_client(cfg)
             buckets = [b["Name"] for b in cos.list_buckets().get("Buckets", [])]
         return JSONResponse({"buckets": buckets})
-    except Exception as exc:
+    except Exception:
+        logger.exception("Failed to list IBM COS buckets for connection %s", connection_id)
         return JSONResponse({"error": "Failed to list buckets"}, status_code=500)
 
 
@@ -161,9 +162,9 @@ async def ibm_cos_bucket_status(
         cfg = connection.config
         cos = create_ibm_cos_resource(cfg)
         all_buckets = [b.name for b in cos.buckets.all()]
-    except Exception as exc:
+    except Exception:
         logger.exception("Failed to list IBM COS buckets for connection %s", connection_id)
-        return JSONResponse({"error": f"Failed to list buckets: {exc}"}, status_code=500)
+        return JSONResponse({"error": "Failed to list buckets"}, status_code=500)
 
     # 2. Count indexed documents per bucket from OpenSearch
     ingested_counts: dict = {}

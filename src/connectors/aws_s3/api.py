@@ -70,9 +70,10 @@ async def s3_configure(
     try:
         s3 = create_s3_resource(conn_config)
         list(s3.buckets.all())
-    except Exception as exc:
+    except Exception:
+        logger.exception("Failed to connect to S3 during credential test.")
         return JSONResponse(
-            {"error": f"Could not connect to S3: {exc}"},
+            {"error": "Could not connect to S3 with the provided configuration."},
             status_code=400,
         )
 
@@ -112,8 +113,9 @@ async def s3_list_buckets(
         s3 = create_s3_resource(connection.config)
         buckets = [b.name for b in s3.buckets.all()]
         return JSONResponse({"buckets": buckets})
-    except Exception as exc:
-        return JSONResponse({"error": f"Failed to list buckets: {exc}"}, status_code=500)
+    except Exception:
+        logger.exception("Failed to list S3 buckets for connection %s", connection_id)
+        return JSONResponse({"error": "Failed to list buckets"}, status_code=500)
 
 
 async def s3_bucket_status(
