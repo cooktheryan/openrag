@@ -55,6 +55,10 @@ class SettingsUpdateBody(BaseModel):
     watsonx_endpoint: Optional[str] = Field(None, min_length=1)
     watsonx_project_id: Optional[str] = Field(None, min_length=1)
     ollama_endpoint: Optional[str] = Field(None, min_length=1)
+    remove_ollama_config: Optional[bool] = None
+    remove_openai_config: Optional[bool] = None
+    remove_anthropic_config: Optional[bool] = None
+    remove_watsonx_config: Optional[bool] = None
 
 
 class OnboardingBody(BaseModel):
@@ -359,6 +363,22 @@ async def get_settings(
         return JSONResponse(
             {"error": f"Failed to retrieve settings: {str(e)}"}, status_code=500
         )
+
+
+def _first_configured_llm_provider(config, excluding: str) -> str:
+    """Return the first configured LLM provider that isn't `excluding`."""
+    for p in ["openai", "anthropic", "watsonx", "ollama"]:
+        if p != excluding and getattr(config.providers, p).configured:
+            return p
+    return "openai"
+
+
+def _first_configured_embedding_provider(config, excluding: str) -> str:
+    """Return the first configured embedding provider (openai/watsonx/ollama) that isn't `excluding`."""
+    for p in ["openai", "watsonx", "ollama"]:
+        if p != excluding and getattr(config.providers, p).configured:
+            return p
+    return "openai"
 
 
 async def update_settings(
@@ -673,6 +693,99 @@ async def update_settings(
             config_updated = True
             provider_updated = True
 
+        if body.remove_ollama_config:
+            other_providers_configured = (
+                current_config.providers.openai.configured
+                or current_config.providers.anthropic.configured
+                or current_config.providers.watsonx.configured
+            )
+            if not other_providers_configured:
+                return JSONResponse(
+                    {"error": "Cannot remove Ollama configuration: configure another model provider first."},
+                    status_code=400,
+                )
+            current_config.providers.ollama.endpoint = ""
+            current_config.providers.ollama.configured = False
+            if current_config.agent.llm_provider == "ollama":
+                current_config.agent.llm_provider = _first_configured_llm_provider(current_config, "ollama")
+                current_config.agent.llm_model = ""
+            if current_config.knowledge.embedding_provider == "ollama":
+                current_config.knowledge.embedding_provider = _first_configured_embedding_provider(current_config, "ollama")
+                current_config.knowledge.embedding_model = ""
+            config_updated = True
+            provider_updated = True
+
+        if body.remove_openai_config:
+            other_providers_configured = (
+                current_config.providers.anthropic.configured
+                or current_config.providers.watsonx.configured
+                or current_config.providers.ollama.configured
+            )
+            if not other_providers_configured:
+                return JSONResponse(
+                    {"error": "Cannot remove OpenAI configuration: configure another model provider first."},
+                    status_code=400,
+                )
+            current_config.providers.openai.api_key = ""
+            current_config.providers.openai.configured = False
+            if current_config.agent.llm_provider == "openai":
+                fb = _first_configured_llm_provider(current_config, "openai")
+                current_config.agent.llm_provider = fb
+                current_config.agent.llm_model = ""
+            if current_config.knowledge.embedding_provider == "openai":
+                fb = _first_configured_embedding_provider(current_config, "openai")
+                current_config.knowledge.embedding_provider = fb
+                current_config.knowledge.embedding_model = ""
+            config_updated = True
+            provider_updated = True
+
+        if body.remove_anthropic_config:
+            other_providers_configured = (
+                current_config.providers.openai.configured
+                or current_config.providers.watsonx.configured
+                or current_config.providers.ollama.configured
+            )
+            if not other_providers_configured:
+                return JSONResponse(
+                    {"error": "Cannot remove Anthropic configuration: configure another model provider first."},
+                    status_code=400,
+                )
+            current_config.providers.anthropic.api_key = ""
+            current_config.providers.anthropic.configured = False
+            if current_config.agent.llm_provider == "anthropic":
+                fb = _first_configured_llm_provider(current_config, "anthropic")
+                current_config.agent.llm_provider = fb
+                current_config.agent.llm_model = ""
+            # Anthropic is not a valid embedding provider; no embedding reset needed
+            config_updated = True
+            provider_updated = True
+
+        if body.remove_watsonx_config:
+            other_providers_configured = (
+                current_config.providers.openai.configured
+                or current_config.providers.anthropic.configured
+                or current_config.providers.ollama.configured
+            )
+            if not other_providers_configured:
+                return JSONResponse(
+                    {"error": "Cannot remove IBM watsonx.ai configuration: configure another model provider first."},
+                    status_code=400,
+                )
+            current_config.providers.watsonx.api_key = ""
+            current_config.providers.watsonx.endpoint = ""
+            current_config.providers.watsonx.project_id = ""
+            current_config.providers.watsonx.configured = False
+            if current_config.agent.llm_provider == "watsonx":
+                fb = _first_configured_llm_provider(current_config, "watsonx")
+                current_config.agent.llm_provider = fb
+                current_config.agent.llm_model = ""
+            if current_config.knowledge.embedding_provider == "watsonx":
+                fb = _first_configured_embedding_provider(current_config, "watsonx")
+                current_config.knowledge.embedding_provider = fb
+                current_config.knowledge.embedding_model = ""
+            config_updated = True
+            provider_updated = True
+
         if provider_updated:
             await TelemetryClient.send_event(
                 Category.SETTINGS_OPERATIONS,
@@ -693,7 +806,7 @@ async def update_settings(
         # Update Langflow global variables and model values if provider settings changed
         await clients.refresh_patched_client()
 
-        if should_validate:
+        if should_validate or provider_updated:
             try:
                 flows_service = _get_flows_service()
 
@@ -706,8 +819,8 @@ async def update_settings(
                         current_config, session_manager
                     )
 
-                # Update model values if provider or model changed
-                if body.llm_provider is not None or body.llm_model is not None or body.embedding_provider is not None or body.embedding_model is not None:
+                # Update model values if provider or model changed (including removals that trigger fallback)
+                if body.llm_provider is not None or body.llm_model is not None or body.embedding_provider is not None or body.embedding_model is not None or provider_updated:
                     await _update_langflow_model_values(current_config, flows_service)
 
             except Exception as e:
