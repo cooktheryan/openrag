@@ -1,10 +1,7 @@
 # Build Langflow from source on UBI9
-# Usage: podman build --platform linux/amd64 -t quay.io/rcook/openrag-langflow:latest -f Dockerfile.langflow .
+# Usage: docker build --platform linux/amd64 -t quay.io/rcook/openrag-langflow:latest -f Dockerfile.langflow .
 
-# -----------------------------------------------------------------------------
-# Stage: builder — runs on native platform to avoid qemu segfaults
-# -----------------------------------------------------------------------------
-FROM --platform=$BUILDPLATFORM registry.access.redhat.com/ubi9/ubi:latest AS builder
+FROM registry.access.redhat.com/ubi9/ubi:latest
 
 ENV PYTHONUNBUFFERED=1
 ENV RUSTFLAGS="--cfg reqwest_unstable"
@@ -38,43 +35,27 @@ RUN dnf module enable -y nodejs:20 && \
 
 WORKDIR /app
 
-# Clone the repository and checkout the specified branch
 RUN echo "Cloning ${GIT_REPO} branch ${GIT_BRANCH}..." && \
     git clone --depth 1 --branch ${GIT_BRANCH} ${GIT_REPO} /app
 
-# Install backend dependencies
+# uv sync downloads its own Python 3.13 (project requires >=3.13)
 RUN uv sync --frozen --no-install-project --no-editable --extra postgresql
 
-# Build frontend (split into steps to reduce peak memory usage)
+# Build frontend
 WORKDIR /app/src/frontend
 RUN npm ci --maxsockets 1
 RUN NODE_OPTIONS="--max_old_space_size=2048" npm run build
 RUN mkdir -p /app/src/backend/base/langflow/frontend && \
     cp -r build/* /app/src/backend/base/langflow/frontend/
 
-# Return to app directory and install the project
 WORKDIR /app
 RUN uv sync --frozen --no-dev --no-editable --extra postgresql
 
-# -----------------------------------------------------------------------------
-# Stage: runtime — target platform image
-# -----------------------------------------------------------------------------
-FROM registry.access.redhat.com/ubi9/ubi-minimal:latest AS runtime
-
-RUN microdnf install -y --nodocs \
-    python3.12 \
-    ca-certificates \
-    openssl \
-    && ln -sf /usr/bin/python3.12 /usr/bin/python3 \
-    && ln -sf /usr/bin/python3 /usr/bin/python \
-    && microdnf clean all
-
-WORKDIR /app
-
-COPY --from=builder /app /app
-
 ENV VIRTUAL_ENV=/app/.venv
 ENV PATH="/app/.venv/bin:$PATH"
+
+# Verify critical import
+RUN python -c "import langflow; print('langflow OK')"
 
 EXPOSE 7860
 
