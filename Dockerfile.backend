@@ -1,9 +1,6 @@
 # Build: docker build --platform linux/amd64 -t openrag-backend -f Dockerfile.backend .
 
-# -----------------------------------------------------------------------------
-# Stage: builder
-# -----------------------------------------------------------------------------
-FROM registry.access.redhat.com/ubi9/ubi-minimal:latest AS builder
+FROM registry.access.redhat.com/ubi9/ubi-minimal:latest
 
 RUN microdnf install -y --nodocs \
     python3.12 \
@@ -19,43 +16,17 @@ RUN microdnf install -y --nodocs \
     make \
     && ln -sf /usr/bin/python3.12 /usr/bin/python3 \
     && ln -sf /usr/bin/python3 /usr/bin/python \
-    && curl -LsSf https://astral.sh/uv/install.sh | sh \
     && microdnf clean all
-
-ENV PATH="/root/.local/bin:$PATH"
 
 WORKDIR /app
 
 COPY pyproject.toml uv.lock ./
-RUN uv sync
+RUN pip3.12 install --no-cache-dir .
 
 COPY src/ ./src/
 COPY flows/ ./flows/
 
-# Verify critical deps are importable
-RUN /app/.venv/bin/python -c "import structlog; print('structlog OK')"
-
-# -----------------------------------------------------------------------------
-# Stage: runtime
-# -----------------------------------------------------------------------------
-FROM registry.access.redhat.com/ubi9/ubi-minimal:latest AS runtime
-
-RUN microdnf install -y --nodocs \
-    python3.12 \
-    ca-certificates \
-    openssl \
-    && ln -sf /usr/bin/python3.12 /usr/bin/python3 \
-    && ln -sf /usr/bin/python3 /usr/bin/python \
-    && microdnf clean all
-
-WORKDIR /app
-
-COPY --from=builder /app /app
-
-ENV VIRTUAL_ENV=/app/.venv
-ENV PATH="/app/.venv/bin:$PATH"
-
-# Verify deps survived the copy
+# Verify critical deps
 RUN python -c "import structlog; print('structlog OK')"
 
 EXPOSE 8000
