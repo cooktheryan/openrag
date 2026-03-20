@@ -1,20 +1,22 @@
-# syntax=docker/dockerfile:1.4
-# BuildKit: enables cache mounts and better layer reuse.
-#
-# Build: podman build --platform linux/amd64 -t openrag-backend .
+# Build: docker build --platform linux/amd64 -t openrag-backend -f Dockerfile.backend .
 
 # -----------------------------------------------------------------------------
-# Stage: base (system + uv) — runs on native platform
+# Stage: builder
 # -----------------------------------------------------------------------------
-FROM --platform=$BUILDPLATFORM registry.access.redhat.com/ubi9/ubi-minimal:latest AS base
+FROM registry.access.redhat.com/ubi9/ubi-minimal:latest AS builder
 
 RUN microdnf install -y --nodocs \
     python3.12 \
     python3.12-pip \
+    python3.12-devel \
     tar \
     gzip \
     ca-certificates \
     openssl \
+    git \
+    gcc \
+    gcc-c++ \
+    make \
     && ln -sf /usr/bin/python3.12 /usr/bin/python3 \
     && ln -sf /usr/bin/python3 /usr/bin/python \
     && curl -LsSf https://astral.sh/uv/install.sh | sh \
@@ -22,32 +24,19 @@ RUN microdnf install -y --nodocs \
 
 ENV PATH="/root/.local/bin:$PATH"
 
-# -----------------------------------------------------------------------------
-# Stage: builder (deps + app) — runs on native platform
-# -----------------------------------------------------------------------------
-FROM base AS builder
-
-# Build-time deps only (not in final image)
-RUN microdnf install -y --nodocs \
-    git \
-    gcc \
-    gcc-c++ \
-    make \
-    python3.12-devel \
-    && microdnf clean all
-
 WORKDIR /app
 
-# Dependency layer: reuse as long as lockfile and pyproject don't change
 COPY pyproject.toml uv.lock ./
 RUN uv sync
 
-# Application (invalidates after deps only when src/flows change)
 COPY src/ ./src/
 COPY flows/ ./flows/
 
+# Verify critical deps are importable
+RUN /app/.venv/bin/python -c "import structlog; print('structlog OK')"
+
 # -----------------------------------------------------------------------------
-# Stage: runtime (target platform image)
+# Stage: runtime
 # -----------------------------------------------------------------------------
 FROM registry.access.redhat.com/ubi9/ubi-minimal:latest AS runtime
 
@@ -65,6 +54,9 @@ COPY --from=builder /app /app
 
 ENV VIRTUAL_ENV=/app/.venv
 ENV PATH="/app/.venv/bin:$PATH"
+
+# Verify deps survived the copy
+RUN python -c "import structlog; print('structlog OK')"
 
 EXPOSE 8000
 
