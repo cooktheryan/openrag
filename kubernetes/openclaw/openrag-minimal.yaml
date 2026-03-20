@@ -1,0 +1,330 @@
+# OpenRAG minimal deployment for OpenClaw
+# Namespace: rcook-callie-openclaw
+#
+# 1. Create the secret first (see oc create secret command in deployment notes)
+# 2. oc apply -f kubernetes/openclaw/openrag-minimal.yaml
+# 3. oc port-forward svc/openrag-backend 8000:8000 -n rcook-callie-openclaw
+# 4. oc port-forward svc/openrag-langflow 7860:7860 -n rcook-callie-openclaw
+
+# ============================================================================
+# OpenSearch
+# ============================================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: openrag-opensearch
+  namespace: rcook-callie-openclaw
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: openrag-opensearch
+  template:
+    metadata:
+      labels:
+        app: openrag-opensearch
+    spec:
+      containers:
+        - name: opensearch
+          image: quay.io/rcook/openrag-opensearch:latest
+          ports:
+            - containerPort: 9200
+            - containerPort: 9600
+          env:
+            - name: discovery.type
+              value: single-node
+            - name: OPENSEARCH_INITIAL_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: openrag-secrets
+                  key: opensearch-password
+          command:
+            - bash
+            - -c
+            - |
+              sudo chown -R opensearch:opensearch /usr/share/opensearch/data || true
+              /usr/share/opensearch/opensearch-docker-entrypoint.sh opensearch &
+              sleep 10 && /usr/share/opensearch/setup-security.sh &
+              wait
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "2Gi"
+            limits:
+              cpu: "2"
+              memory: "4Gi"
+          volumeMounts:
+            - name: data
+              mountPath: /usr/share/opensearch/data
+      volumes:
+        - name: data
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: openrag-opensearch
+  namespace: rcook-callie-openclaw
+spec:
+  type: ClusterIP
+  ports:
+    - name: http
+      port: 9200
+      targetPort: 9200
+    - name: transport
+      port: 9600
+      targetPort: 9600
+  selector:
+    app: openrag-opensearch
+---
+# ============================================================================
+# Langflow
+# ============================================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: openrag-langflow
+  namespace: rcook-callie-openclaw
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: openrag-langflow
+  template:
+    metadata:
+      labels:
+        app: openrag-langflow
+    spec:
+      containers:
+        - name: langflow
+          image: quay.io/rcook/openrag-langflow:latest
+          ports:
+            - containerPort: 7860
+          env:
+            - name: LANGFLOW_AUTO_LOGIN
+              value: "true"
+            - name: LANGFLOW_LOAD_FLOWS_PATH
+              value: /app/flows
+            - name: LANGFLOW_LOG_LEVEL
+              value: INFO
+            - name: LANGFLOW_DEACTIVATE_TRACING
+              value: "true"
+            - name: HIDE_GETTING_STARTED_PROGRESS
+              value: "true"
+            - name: LANGFLOW_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: openrag-secrets
+                  key: langflow-secret-key
+            - name: LANGFLOW_SUPERUSER
+              valueFrom:
+                secretKeyRef:
+                  name: openrag-secrets
+                  key: langflow-superuser
+            - name: LANGFLOW_SUPERUSER_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: openrag-secrets
+                  key: langflow-superuser-password
+            - name: OPENSEARCH_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: openrag-secrets
+                  key: opensearch-password
+            - name: OPENSEARCH_HOST
+              value: openrag-opensearch
+            - name: OPENSEARCH_PORT
+              value: "9200"
+            - name: OPENSEARCH_URL
+              value: https://openrag-opensearch:9200
+            - name: OPENSEARCH_INDEX_NAME
+              value: documents
+            - name: OPENAI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: openrag-secrets
+                  key: openai-api-key
+            - name: ANTHROPIC_API_KEY
+              value: "None"
+            - name: WATSONX_APIKEY
+              value: "None"
+            - name: WATSONX_URL
+              value: "None"
+            - name: WATSONX_PROJECT_ID
+              value: "None"
+            - name: OLLAMA_BASE_URL
+              value: "None"
+            - name: DOCLING_SERVE_URL
+              value: "http://localhost:5001"
+            - name: SELECTED_EMBEDDING_MODEL
+              value: text-embedding-3-small
+            - name: JWT
+              value: "None"
+            - name: OWNER
+              value: "None"
+            - name: OWNER_NAME
+              value: "None"
+            - name: OWNER_EMAIL
+              value: "None"
+            - name: CONNECTOR_TYPE
+              value: system
+            - name: CONNECTOR_TYPE_URL
+              value: url
+            - name: DOCUMENT_ID
+              value: ""
+            - name: SOURCE_URL
+              value: ""
+            - name: ALLOWED_USERS
+              value: "[]"
+            - name: ALLOWED_GROUPS
+              value: "[]"
+            - name: OPENRAG-QUERY-FILTER
+              value: "{}"
+            - name: FILENAME
+              value: "None"
+            - name: MIMETYPE
+              value: "None"
+            - name: FILESIZE
+              value: "0"
+            - name: LANGFLOW_VARIABLES_TO_GET_FROM_ENVIRONMENT
+              value: "JWT,OPENRAG-QUERY-FILTER,OPENSEARCH_PASSWORD,OPENSEARCH_URL,OPENSEARCH_INDEX_NAME,DOCLING_SERVE_URL,OWNER,OWNER_NAME,OWNER_EMAIL,CONNECTOR_TYPE,DOCUMENT_ID,SOURCE_URL,ALLOWED_USERS,ALLOWED_GROUPS,FILENAME,MIMETYPE,FILESIZE,SELECTED_EMBEDDING_MODEL,OPENAI_API_KEY,ANTHROPIC_API_KEY,WATSONX_APIKEY,WATSONX_URL,WATSONX_PROJECT_ID,OLLAMA_BASE_URL"
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "1Gi"
+            limits:
+              cpu: "4"
+              memory: "8Gi"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: openrag-langflow
+  namespace: rcook-callie-openclaw
+spec:
+  type: ClusterIP
+  ports:
+    - name: http
+      port: 7860
+      targetPort: 7860
+  selector:
+    app: openrag-langflow
+---
+# ============================================================================
+# Backend
+# ============================================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: openrag-backend
+  namespace: rcook-callie-openclaw
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: openrag-backend
+  template:
+    metadata:
+      labels:
+        app: openrag-backend
+    spec:
+      containers:
+        - name: backend
+          image: quay.io/rcook/openrag-backend:latest
+          ports:
+            - containerPort: 8000
+          env:
+            - name: OPENSEARCH_HOST
+              value: openrag-opensearch
+            - name: OPENSEARCH_PORT
+              value: "9200"
+            - name: OPENSEARCH_USERNAME
+              value: admin
+            - name: OPENSEARCH_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: openrag-secrets
+                  key: opensearch-password
+            - name: OPENSEARCH_INDEX_NAME
+              value: documents
+            - name: LANGFLOW_URL
+              value: http://openrag-langflow:7860
+            - name: LANGFLOW_AUTO_LOGIN
+              value: "true"
+            - name: LANGFLOW_SUPERUSER
+              valueFrom:
+                secretKeyRef:
+                  name: openrag-secrets
+                  key: langflow-superuser
+            - name: LANGFLOW_SUPERUSER_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: openrag-secrets
+                  key: langflow-superuser-password
+            - name: LANGFLOW_CHAT_FLOW_ID
+              value: "1098eea1-6649-4e1d-aed1-b77249fb8dd0"
+            - name: LANGFLOW_INGEST_FLOW_ID
+              value: "5488df7c-b93f-4f87-a446-b67028bc0813"
+            - name: LANGFLOW_URL_INGEST_FLOW_ID
+              value: "72c3d17c-2dac-4a73-b48a-6518473d7830"
+            - name: NUDGES_FLOW_ID
+              value: "ebc01d31-1976-46ce-a385-b0240327226c"
+            - name: LANGFLOW_KEY_RETRIES
+              value: "15"
+            - name: LANGFLOW_KEY_RETRY_DELAY
+              value: "2.0"
+            - name: OPENAI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: openrag-secrets
+                  key: openai-api-key
+            - name: DISABLE_INGEST_WITH_LANGFLOW
+              value: "false"
+            - name: INGEST_SAMPLE_DATA
+              value: "true"
+            - name: LOG_LEVEL
+              value: INFO
+            - name: LOG_FORMAT
+              value: json
+            - name: SERVICE_NAME
+              value: openrag
+            - name: SESSION_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: openrag-secrets
+                  key: session-secret
+            - name: LANGFLOW_TIMEOUT
+              value: "2400"
+            - name: LANGFLOW_CONNECT_TIMEOUT
+              value: "30"
+            - name: INGESTION_TIMEOUT
+              value: "3600"
+            - name: UPLOAD_BATCH_SIZE
+              value: "25"
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "2Gi"
+            limits:
+              cpu: "4"
+              memory: "16Gi"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: openrag-backend
+  namespace: rcook-callie-openclaw
+spec:
+  type: ClusterIP
+  ports:
+    - name: http
+      port: 8000
+      targetPort: 8000
+  selector:
+    app: openrag-backend

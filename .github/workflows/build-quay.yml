@@ -1,0 +1,49 @@
+name: Build & Push to Quay.io (amd64)
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+env:
+  REGISTRY: quay.io
+  REGISTRY_USER: rcook
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - image: openrag-backend
+            dockerfile: Dockerfile.backend
+          - image: openrag-langflow
+            dockerfile: Dockerfile.langflow
+          - image: openrag-opensearch
+            dockerfile: Dockerfile
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Log in to Quay.io
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ secrets.QUAY_USERNAME }}
+          password: ${{ secrets.QUAY_PASSWORD }}
+
+      - name: Set short SHA
+        id: vars
+        run: echo "short_sha=${GITHUB_SHA::8}" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.REGISTRY_USER }}/${{ matrix.image }}:latest
+            ${{ env.REGISTRY }}/${{ env.REGISTRY_USER }}/${{ matrix.image }}:${{ steps.vars.outputs.short_sha }}
