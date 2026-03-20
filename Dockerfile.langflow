@@ -55,6 +55,12 @@ RUN uv sync --frozen --no-dev --no-editable --extra postgresql --python 3.13
 ENV VIRTUAL_ENV=/app/.venv
 ENV PATH="/app/.venv/bin:$PATH"
 
+# OpenShift runs as arbitrary UID — make writable dirs
+RUN mkdir -p /app/.cache /app/.local /tmp && \
+    chmod -R 777 /app/.cache /app/.local /tmp
+ENV HOME=/app
+ENV XDG_CACHE_HOME=/app/.cache
+
 # Verify critical import
 RUN python -c "import langflow; print('langflow OK')"
 
