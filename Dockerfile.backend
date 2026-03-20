@@ -24,7 +24,10 @@ ENV PATH="/root/.local/bin:$PATH"
 WORKDIR /app
 
 COPY pyproject.toml uv.lock ./
-RUN uv sync --python /usr/bin/python3.12
+
+# uv sync downloads its own Python 3.13 (project requires >=3.13)
+# and installs all deps into the venv
+RUN uv sync
 
 COPY src/ ./src/
 COPY flows/ ./flows/
