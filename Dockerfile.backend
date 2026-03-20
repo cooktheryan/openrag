@@ -1,33 +1,40 @@
 # syntax=docker/dockerfile:1.4
 # BuildKit: enables cache mounts and better layer reuse.
 #
-# Build: docker build -t openrag-backend .
+# Build: podman build --platform linux/amd64 -t openrag-backend .
 
 # -----------------------------------------------------------------------------
-# Stage: base (system + uv)
+# Stage: base (system + uv) — runs on native platform
 # -----------------------------------------------------------------------------
-FROM python:3.13-slim AS base
+FROM --platform=$BUILDPLATFORM registry.access.redhat.com/ubi9/ubi-minimal:latest AS base
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl \
+RUN microdnf install -y --nodocs \
+    python3.12 \
+    python3.12-pip \
+    tar \
+    gzip \
     ca-certificates \
     openssl \
-    \
+    && ln -sf /usr/bin/python3.12 /usr/bin/python3 \
+    && ln -sf /usr/bin/python3 /usr/bin/python \
     && curl -LsSf https://astral.sh/uv/install.sh | sh \
-    && rm -rf /var/lib/apt/lists/*
+    && microdnf clean all
 
 ENV PATH="/root/.local/bin:$PATH"
 
 # -----------------------------------------------------------------------------
-# Stage: builder (deps + app)
+# Stage: builder (deps + app) — runs on native platform
 # -----------------------------------------------------------------------------
 FROM base AS builder
 
 # Build-time deps only (not in final image)
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN microdnf install -y --nodocs \
     git \
-    build-essential \
-    && rm -rf /var/lib/apt/lists/*
+    gcc \
+    gcc-c++ \
+    make \
+    python3.12-devel \
+    && microdnf clean all
 
 WORKDIR /app
 
@@ -41,15 +48,17 @@ COPY src/ ./src/
 COPY flows/ ./flows/
 
 # -----------------------------------------------------------------------------
-# Stage: runtime (minimal image)
+# Stage: runtime (target platform image)
 # -----------------------------------------------------------------------------
-FROM python:3.13-slim AS runtime
+FROM registry.access.redhat.com/ubi9/ubi-minimal:latest AS runtime
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl \
+RUN microdnf install -y --nodocs \
+    python3.12 \
     ca-certificates \
     openssl \
-    && rm -rf /var/lib/apt/lists/*
+    && ln -sf /usr/bin/python3.12 /usr/bin/python3 \
+    && ln -sf /usr/bin/python3 /usr/bin/python \
+    && microdnf clean all
 
 WORKDIR /app
 

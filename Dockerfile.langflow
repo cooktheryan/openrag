@@ -1,6 +1,80 @@
-FROM langflowai/langflow:1.8.0
+# Build Langflow from source on UBI9
+# Usage: podman build --platform linux/amd64 -t quay.io/rcook/openrag-langflow:latest -f Dockerfile.langflow .
 
-RUN pip install uv
+# -----------------------------------------------------------------------------
+# Stage: builder — runs on native platform to avoid qemu segfaults
+# -----------------------------------------------------------------------------
+FROM --platform=$BUILDPLATFORM registry.access.redhat.com/ubi9/ubi:latest AS builder
+
+ENV PYTHONUNBUFFERED=1
+ENV RUSTFLAGS="--cfg reqwest_unstable"
+
+ARG GIT_REPO=https://github.com/cooktheryan/langflow.git
+ARG GIT_BRANCH=main
+
+RUN dnf module enable -y nodejs:20 && \
+    dnf install -y --nodocs \
+    python3.12 \
+    python3.12-pip \
+    python3.12-devel \
+    gcc \
+    gcc-c++ \
+    make \
+    tar \
+    gzip \
+    git \
+    ca-certificates \
+    openssl \
+    openssl-devel \
+    pkg-config \
+    nodejs \
+    npm \
+    rust \
+    cargo \
+    && ln -sf /usr/bin/python3.12 /usr/bin/python3 \
+    && ln -sf /usr/bin/python3 /usr/bin/python \
+    && pip3.12 install uv \
+    && dnf clean all
+
+WORKDIR /app
+
+# Clone the repository and checkout the specified branch
+RUN echo "Cloning ${GIT_REPO} branch ${GIT_BRANCH}..." && \
+    git clone --depth 1 --branch ${GIT_BRANCH} ${GIT_REPO} /app
+
+# Install backend dependencies
+RUN uv sync --frozen --no-install-project --no-editable --extra postgresql
+
+# Build frontend (split into steps to reduce peak memory usage)
+WORKDIR /app/src/frontend
+RUN npm ci --maxsockets 1
+RUN NODE_OPTIONS="--max_old_space_size=2048" npm run build
+RUN mkdir -p /app/src/backend/base/langflow/frontend && \
+    cp -r build/* /app/src/backend/base/langflow/frontend/
+
+# Return to app directory and install the project
+WORKDIR /app
+RUN uv sync --frozen --no-dev --no-editable --extra postgresql
+
+# -----------------------------------------------------------------------------
+# Stage: runtime — target platform image
+# -----------------------------------------------------------------------------
+FROM registry.access.redhat.com/ubi9/ubi-minimal:latest AS runtime
+
+RUN microdnf install -y --nodocs \
+    python3.12 \
+    ca-certificates \
+    openssl \
+    && ln -sf /usr/bin/python3.12 /usr/bin/python3 \
+    && ln -sf /usr/bin/python3 /usr/bin/python \
+    && microdnf clean all
+
+WORKDIR /app
+
+COPY --from=builder /app /app
+
+ENV VIRTUAL_ENV=/app/.venv
+ENV PATH="/app/.venv/bin:$PATH"
 
 EXPOSE 7860
 

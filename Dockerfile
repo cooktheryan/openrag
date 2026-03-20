@@ -1,38 +1,67 @@
 ########################################
-# Stage 1: Upstream OpenSearch with plugins
+# Stage 1: UBI9 base with OpenSearch tarball + plugins
 ########################################
-FROM opensearchproject/opensearch:3.2.0 AS upstream_opensearch
+FROM registry.access.redhat.com/ubi9/ubi:latest AS opensearch_builder
+
+ARG OPENSEARCH_VERSION=3.2.0
+ARG OPENSEARCH_HOME=/usr/share/opensearch
+ARG TARGETARCH
+
+# Install tools needed for plugin operations (curl-minimal already present in ubi)
+RUN dnf install -y --nodocs tar gzip findutils && \
+    dnf clean all
+
+# Download OpenSearch distribution tarball
+RUN mkdir -p /tmp/opensearch-dist && \
+    if [ "$TARGETARCH" = "amd64" ]; then \
+      export ARCH=x64; \
+    elif [ "$TARGETARCH" = "arm64" ]; then \
+      export ARCH=arm64; \
+    else \
+      echo "Unsupported architecture: $TARGETARCH" && exit 1; \
+    fi && \
+    curl -fsSL https://artifacts.opensearch.org/releases/bundle/opensearch/${OPENSEARCH_VERSION}/opensearch-${OPENSEARCH_VERSION}-linux-${ARCH}.tar.gz \
+      | tar zxf - --strip-components=1 -C /tmp/opensearch-dist
+
+# Move distribution into place
+RUN mkdir -p ${OPENSEARCH_HOME} && \
+    mv /tmp/opensearch-dist/* ${OPENSEARCH_HOME}/
+
+WORKDIR ${OPENSEARCH_HOME}
+ENV JAVA_HOME=${OPENSEARCH_HOME}/jdk
+ENV PATH=$PATH:${JAVA_HOME}/bin:${OPENSEARCH_HOME}/bin
+ENV OPENSEARCH_PATH_CONF=${OPENSEARCH_HOME}/config
 
 # Remove plugins
 RUN opensearch-plugin remove opensearch-neural-search || true && \
     opensearch-plugin remove opensearch-knn || true && \
     # removing this one due to Netty CVE-2025-58056, can bring it back in the future
-    opensearch-plugin remove opensearch-security-analytics || true 
+    opensearch-plugin remove opensearch-security-analytics || true
 
 # Prepare jvector plugin artifacts
 RUN mkdir -p /tmp/opensearch-jvector-plugin && \
-    curl -L -s https://github.com/opensearch-project/opensearch-jvector/releases/download/3.2.0.0/artifacts.tar.gz \
+    curl -L -s https://github.com/opensearch-project/opensearch-jvector/releases/download/${OPENSEARCH_VERSION}.0/artifacts.tar.gz \
       | tar zxvf - -C /tmp/opensearch-jvector-plugin
 
 # Prepare neural-search plugin
 RUN mkdir -p /tmp/opensearch-neural-search && \
-    curl -L -s https://storage.googleapis.com/opensearch-jvector/opensearch-neural-search-3.2.0.0-20251029200300.zip \
+    curl -L -s https://storage.googleapis.com/opensearch-jvector/opensearch-neural-search-${OPENSEARCH_VERSION}.0-20251029200300.zip \
       > /tmp/opensearch-neural-search/plugin.zip
 
 # Install additional plugins
-RUN opensearch-plugin install --batch file:///tmp/opensearch-jvector-plugin/repository/org/opensearch/plugin/opensearch-jvector-plugin/3.2.0.0/opensearch-jvector-plugin-3.2.0.0.zip && \
+RUN opensearch-plugin install --batch file:///tmp/opensearch-jvector-plugin/repository/org/opensearch/plugin/opensearch-jvector-plugin/${OPENSEARCH_VERSION}.0/opensearch-jvector-plugin-${OPENSEARCH_VERSION}.0.zip && \
     opensearch-plugin install --batch file:///tmp/opensearch-neural-search/plugin.zip && \
     opensearch-plugin install --batch repository-gcs && \
     opensearch-plugin install --batch repository-azure && \
     # opensearch-plugin install --batch repository-s3 && \
-    opensearch-plugin install --batch https://github.com/opensearch-project/opensearch-prometheus-exporter/releases/download/3.2.0.0/prometheus-exporter-3.2.0.0.zip
+    opensearch-plugin install --batch https://github.com/opensearch-project/opensearch-prometheus-exporter/releases/download/${OPENSEARCH_VERSION}.0/prometheus-exporter-${OPENSEARCH_VERSION}.0.zip
 
 # Apply Netty patch
 COPY patch-netty.sh /tmp/
-RUN whoami && bash /tmp/patch-netty.sh
+RUN bash /tmp/patch-netty.sh
 
 # Set permissions for OpenShift compatibility before copying
-RUN chmod -R g=u /usr/share/opensearch
+RUN chmod -R g=u ${OPENSEARCH_HOME}
 
 
 ########################################
@@ -64,8 +93,8 @@ RUN groupadd -g $GID opensearch && \
 RUN usermod -aG wheel opensearch && \
     echo "opensearch ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
 
-# Copy OpenSearch from the upstream stage
-COPY --from=upstream_opensearch --chown=$UID:0 $OPENSEARCH_HOME $OPENSEARCH_HOME
+# Copy OpenSearch from the builder stage
+COPY --from=opensearch_builder --chown=$UID:0 $OPENSEARCH_HOME $OPENSEARCH_HOME
 
 ARG OPENSEARCH_VERSION=3.2.0
 
@@ -135,4 +164,3 @@ EXPOSE 9200 9300 9600 9650
 
 ENTRYPOINT ["./opensearch-docker-entrypoint.sh"]
 CMD ["opensearch"]
-
