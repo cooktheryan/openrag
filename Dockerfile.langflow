@@ -38,8 +38,9 @@ WORKDIR /app
 RUN echo "Cloning ${GIT_REPO} branch ${GIT_BRANCH}..." && \
     git clone --depth 1 --branch ${GIT_BRANCH} ${GIT_REPO} /app
 
-# uv sync downloads its own Python 3.13 (project requires >=3.13)
-RUN uv sync --frozen --no-install-project --no-editable --extra postgresql
+# Force Python 3.13 — UBI9's 3.12 ships sqlite3 < 3.35 which breaks chromadb
+RUN uv python install 3.13
+RUN uv sync --frozen --no-install-project --no-editable --extra postgresql --python 3.13
 
 # Build frontend
 WORKDIR /app/src/frontend
@@ -49,7 +50,7 @@ RUN mkdir -p /app/src/backend/base/langflow/frontend && \
     cp -r build/* /app/src/backend/base/langflow/frontend/
 
 WORKDIR /app
-RUN uv sync --frozen --no-dev --no-editable --extra postgresql
+RUN uv sync --frozen --no-dev --no-editable --extra postgresql --python 3.13
 
 ENV VIRTUAL_ENV=/app/.venv
 ENV PATH="/app/.venv/bin:$PATH"
