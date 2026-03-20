@@ -16,15 +16,21 @@ RUN microdnf install -y --nodocs \
     make \
     && ln -sf /usr/bin/python3.12 /usr/bin/python3 \
     && ln -sf /usr/bin/python3 /usr/bin/python \
+    && curl -LsSf https://astral.sh/uv/install.sh | sh \
     && microdnf clean all
+
+ENV PATH="/root/.local/bin:$PATH"
 
 WORKDIR /app
 
 COPY pyproject.toml uv.lock ./
-RUN pip3.12 install --no-cache-dir .
+RUN uv sync --python /usr/bin/python3.12
 
 COPY src/ ./src/
 COPY flows/ ./flows/
+
+ENV VIRTUAL_ENV=/app/.venv
+ENV PATH="/app/.venv/bin:$PATH"
 
 # Verify critical deps
 RUN python -c "import structlog; print('structlog OK')"
