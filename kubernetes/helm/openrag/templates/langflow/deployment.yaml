@@ -123,8 +123,22 @@ spec:
 
           env:
             # Langflow core settings
+            {{- if .Values.langflow.backendOnly }}
+            - name: LANGFLOW_BACKEND_ONLY
+              value: "true"
+            {{- end }}
+            {{- if .Values.langflow.configDir }}
+            - name: LANGFLOW_CONFIG_DIR
+              value: {{ .Values.langflow.configDir | quote }}
+            {{- end }}
+            {{- if .Values.langflow.alembicLogFile }}
+            - name: LANGFLOW_ALEMBIC_LOG_FILE
+              value: {{ .Values.langflow.alembicLogFile | quote }}
+            {{- end }}
+            {{- if and .Values.langflow.flows.loadDefaults .Values.langflow.flows.git.enabled }}
             - name: LANGFLOW_LOAD_FLOWS_PATH
               value: {{ .Values.langflow.persistence.mountPath }}/{{ .Values.langflow.persistence.flowsSubPath }}
+            {{- end }}
             - name: LANGFLOW_DATABASE_URL
               value: "sqlite:///{{ .Values.langflow.persistence.mountPath }}/{{ .Values.langflow.persistence.dbSubPath }}"
             - name: LANGFLOW_DEACTIVATE_TRACING

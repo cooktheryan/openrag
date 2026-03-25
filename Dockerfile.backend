@@ -1,63 +1,75 @@
-# syntax=docker/dockerfile:1.4
-# BuildKit: enables cache mounts and better layer reuse.
-#
-# Build: docker build -t openrag-backend .
+# Build: docker build --platform linux/amd64 -t openrag-backend -f Dockerfile.backend .
 
-# -----------------------------------------------------------------------------
-# Stage: base (system + uv)
-# -----------------------------------------------------------------------------
-FROM python:3.13-slim AS base
+# ── Builder stage ──────────────────────────────────────────────────────────────
+# ubi9/ubi-minimal:latest (pinned 2026-03-24)
+FROM registry.access.redhat.com/ubi9/ubi-minimal@sha256:83006d535923fcf1345067873524a3980316f51794f01d8655be55d6e9387183 AS builder
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl \
+RUN microdnf install -y --nodocs \
+    python3.12 \
+    python3.12-pip \
+    python3.12-devel \
+    tar \
+    gzip \
     ca-certificates \
     openssl \
-    \
+    git \
+    gcc \
+    gcc-c++ \
+    make \
+    && ln -sf /usr/bin/python3.12 /usr/bin/python3 \
+    && ln -sf /usr/bin/python3 /usr/bin/python \
     && curl -LsSf https://astral.sh/uv/install.sh | sh \
-    && rm -rf /var/lib/apt/lists/*
+    && microdnf clean all
 
 ENV PATH="/root/.local/bin:$PATH"
 
-# -----------------------------------------------------------------------------
-# Stage: builder (deps + app)
-# -----------------------------------------------------------------------------
-FROM base AS builder
-
-# Build-time deps only (not in final image)
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    git \
-    build-essential \
-    && rm -rf /var/lib/apt/lists/*
-
 WORKDIR /app
 
-# Dependency layer: reuse as long as lockfile and pyproject don't change
 COPY pyproject.toml uv.lock ./
-RUN --mount=type=cache,target=/root/.cache/uv,uid=0,gid=0 \
-    uv sync
 
-# Application (invalidates after deps only when src/flows change)
+# uv sync downloads its own Python 3.13 (project requires >=3.13)
+# and installs all deps into the venv
+RUN uv sync
+
 COPY src/ ./src/
 COPY flows/ ./flows/
 
-# -----------------------------------------------------------------------------
-# Stage: runtime (minimal image)
-# -----------------------------------------------------------------------------
-FROM python:3.13-slim AS runtime
+# Verify critical deps in builder
+ENV VIRTUAL_ENV=/app/.venv
+ENV PATH="/app/.venv/bin:$PATH"
+RUN python -c "import structlog; print('structlog OK')"
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl \
+# ── Runtime stage ──────────────────────────────────────────────────────────────
+# ubi9/ubi-minimal:latest (pinned 2026-03-24)
+FROM registry.access.redhat.com/ubi9/ubi-minimal@sha256:83006d535923fcf1345067873524a3980316f51794f01d8655be55d6e9387183
+
+RUN microdnf install -y --nodocs \
+    python3.12 \
     ca-certificates \
     openssl \
-    && rm -rf /var/lib/apt/lists/*
+    && microdnf clean all
 
 WORKDIR /app
 
-COPY --from=builder /app /app
+# Copy the self-contained venv and uv-managed Python (venv symlinks point here)
+COPY --from=builder /app/.venv /app/.venv
+COPY --from=builder /root/.local/share/uv/python/ /root/.local/share/uv/python/
+COPY --from=builder /app/src /app/src
+COPY --from=builder /app/flows /app/flows
+
+# Create writable dirs for runtime data
+RUN mkdir -p /app/data /app/keys
+
+# OpenShift: create non-root user (UID 1001, GID 0) and fix permissions
+RUN useradd -u 1001 -g 0 -M -d /app -s /sbin/nologin default \
+    && chown -R 1001:0 /app \
+    && chmod -R g=u /app
 
 ENV VIRTUAL_ENV=/app/.venv
 ENV PATH="/app/.venv/bin:$PATH"
 
 EXPOSE 8000
+
+USER 1001
 
 CMD ["python", "src/main.py"]

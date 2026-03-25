@@ -65,13 +65,22 @@ langflow:
       cpu: "4"
       memory: "8Gi"
 
+  # Run in backend-only mode (no frontend static files required)
+  backendOnly: true
+
+  # Config directory for Langflow state (must be writable)
+  configDir: /app/langflow
+
+  # Alembic migration log file path (must be writable)
+  alembicLogFile: /app/langflow/alembic.log
+
   # Persistence for SQLite DB and flows
   persistence:
     enabled: true
     storageClass: ""                      # Empty uses cluster default
     accessMode: ReadWriteOnce
     size: 10Gi
-    mountPath: /app/data
+    mountPath: /app/langflow
     flowsSubPath: flows
     dbSubPath: langflow.db
 
@@ -209,6 +218,12 @@ backend:
       accessMode: ReadWriteOnce
       size: 1Gi
       mountPath: /app/config
+    data:
+      enabled: true
+      storageClass: ""
+      accessMode: ReadWriteOnce
+      size: 1Gi
+      mountPath: /app/data
 
   # Logging
   logLevel: "INFO"                        # DEBUG, INFO, WARNING, ERROR, CRITICAL

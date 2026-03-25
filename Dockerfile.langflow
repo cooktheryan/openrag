@@ -1,7 +1,111 @@
-FROM langflowai/langflow:1.8.0
+# Build Langflow from source on UBI9 (multi-stage)
+# Usage: docker build --platform linux/amd64 -t quay.io/opendatahub/odh-openrag:langflow-latest -f Dockerfile.langflow .
 
-RUN pip install uv
+# ============================================================
+# Stage 1: Builder — full toolchain for compiling native exts
+# ============================================================
+# ubi9/ubi:latest (pinned 2026-03-24)
+FROM registry.access.redhat.com/ubi9/ubi@sha256:9e6e193bfc3596a84d2a32f42d6b1552398ec9735b9a4e893a0fc3c6fbccb381 AS builder
+
+ENV PYTHONUNBUFFERED=1
+ENV RUSTFLAGS="--cfg reqwest_unstable"
+
+ARG GIT_REPO=https://github.com/langflow-ai/langflow.git
+ARG GIT_BRANCH=v1.8.0
+
+RUN dnf module enable -y nodejs:20 && \
+    dnf install -y --nodocs \
+    python3.12 \
+    python3.12-pip \
+    python3.12-devel \
+    gcc \
+    gcc-c++ \
+    make \
+    tar \
+    gzip \
+    git \
+    ca-certificates \
+    openssl \
+    openssl-devel \
+    pkg-config \
+    nodejs \
+    npm \
+    rust \
+    cargo \
+    && ln -sf /usr/bin/python3.12 /usr/bin/python3 \
+    && ln -sf /usr/bin/python3 /usr/bin/python \
+    && pip3.12 install uv \
+    && dnf clean all
+
+WORKDIR /app
+
+RUN echo "Cloning ${GIT_REPO} branch ${GIT_BRANCH}..." && \
+    git clone --depth 1 --branch ${GIT_BRANCH} ${GIT_REPO} /app
+
+# Force Python 3.13 — UBI9's 3.12 ships sqlite3 < 3.35 which breaks chromadb
+RUN uv python install 3.13
+RUN uv sync --frozen --no-install-project --no-editable --extra postgresql --python 3.13
+
+# Build frontend
+WORKDIR /app/src/frontend
+RUN npm ci --maxsockets 1
+RUN NODE_OPTIONS="--max_old_space_size=2048" npm run build
+RUN mkdir -p /app/src/backend/base/langflow/frontend && \
+    cp -r build/* /app/src/backend/base/langflow/frontend/
+
+WORKDIR /app
+RUN uv sync --frozen --no-dev --no-editable --extra postgresql --python 3.13
+
+# ============================================================
+# Stage 2: Runtime — minimal image, no build toolchains
+# ============================================================
+# ubi9/ubi-minimal:latest (pinned 2026-03-24)
+FROM registry.access.redhat.com/ubi9/ubi-minimal@sha256:83006d535923fcf1345067873524a3980316f51794f01d8655be55d6e9387183
+
+ENV PYTHONUNBUFFERED=1
+ENV VIRTUAL_ENV=/app/.venv
+ENV PATH="/app/.venv/bin:$PATH"
+ENV HOME=/app
+ENV XDG_CACHE_HOME=/app/.cache
+
+# Runtime-only dependencies: shared libs needed by native Python packages
+RUN microdnf install -y --nodocs \
+    python3.12 \
+    ca-certificates \
+    openssl \
+    libstdc++ \
+    libffi \
+    zlib \
+    && ln -sf /usr/bin/python3.12 /usr/bin/python3 \
+    && ln -sf /usr/bin/python3 /usr/bin/python \
+    && microdnf clean all
+
+WORKDIR /app
+
+# Copy the venv (includes uv-managed Python 3.13 symlinks)
+COPY --from=builder /app/.venv /app/.venv
+
+# Copy the uv-managed Python 3.13 installation (venv symlinks point here)
+COPY --from=builder /root/.local/share/uv/python/ /root/.local/share/uv/python/
+
+# Copy application source and project metadata
+COPY --from=builder /app/src /app/src
+COPY --from=builder /app/pyproject.toml /app/pyproject.toml
+
+# Create non-root user (UID 1001, GID 0 for OpenShift compatibility)
+RUN useradd -u 1001 -g 0 -M -d /app -s /sbin/nologin langflow
+
+# OpenShift runs as arbitrary UID in group 0 — set ownership and permissions
+RUN mkdir -p /app/.cache /app/.local && \
+    chown -R 1001:0 /app && \
+    chmod -R g=u /app && \
+    chmod -R 775 /app/.cache /app/.local
+
+# Verify critical import
+RUN python -c "import langflow; print('langflow OK')"
 
 EXPOSE 7860
+
+USER 1001
 
 CMD ["langflow", "run", "--host", "0.0.0.0", "--port", "7860"]

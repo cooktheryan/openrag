@@ -164,6 +164,7 @@ spec:
                   key: superuser
             - name: LANGFLOW_SUPERUSER_PASSWORD
               valueFrom:
+                secretKeyRef:
                   name: {{ include "openrag.fullname" . }}-langflow
                   key: superuser-password
             - name: LANGFLOW_KEY
@@ -329,6 +330,10 @@ spec:
             - name: config
               mountPath: {{ .Values.backend.persistence.config.mountPath }}
             {{- end }}
+            {{- if .Values.backend.persistence.data.enabled }}
+            - name: data
+              mountPath: {{ .Values.backend.persistence.data.mountPath }}
+            {{- end }}
             {{- if .Values.langflow.persistence.enabled }}
             - name: flows
               mountPath: /app/flows
@@ -393,6 +398,11 @@ spec:
         - name: config
           persistentVolumeClaim:
             claimName: {{ include "openrag.fullname" . }}-config
+        {{- end }}
+        {{- if .Values.backend.persistence.data.enabled }}
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ include "openrag.fullname" . }}-data
         {{- end }}
         {{- if .Values.langflow.persistence.enabled }}
         - name: flows

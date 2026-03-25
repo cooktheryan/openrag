@@ -1,0 +1,138 @@
+# OpenSearch — vector database for OpenRAG
+#
+# Deploy this BEFORE installing the OpenRAG Helm chart.
+# The Helm chart connects to an external OpenSearch instance — it does not deploy one.
+#
+# Usage:
+#   1. Create the secret:
+#      oc create secret generic openrag-opensearch \
+#        --from-literal=password="$(openssl rand -base64 24)" \
+#        -n <namespace>
+#
+#   2. Deploy:
+#      oc apply -f hack/opensearch.yaml -n <namespace>
+#
+#   3. Wait for the pod to be ready (~60s for bootstrap):
+#      oc wait --for=condition=ready pod -l app=openrag-opensearch --timeout=120s
+#
+# The Helm values should set:
+#   global.opensearch.host: openrag-opensearch
+#   global.opensearch.port: 9200
+#   global.opensearch.scheme: https
+#   global.opensearch.username: admin
+#   global.opensearch.password: <same password from the secret>
+#
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: openrag-opensearch
+  labels:
+    app: openrag-opensearch
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: openrag-opensearch
+  template:
+    metadata:
+      labels:
+        app: openrag-opensearch
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: opensearch
+          image: quay.io/opendatahub/odh-openrag:opensearch-latest
+          ports:
+            - containerPort: 9200
+            - containerPort: 9600
+          env:
+            - name: discovery.type
+              value: single-node
+            - name: OPENSEARCH_INITIAL_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: openrag-opensearch
+                  key: password
+          command:
+            - bash
+            - -c
+            - |
+              OS_HOME=/usr/share/opensearch
+              TOOLS=$OS_HOME/plugins/opensearch-security/tools
+              export OPENSEARCH_JAVA_HOME=$OS_HOME/jdk
+              # Generate admin password hash
+              HASH=$($OS_HOME/jdk/bin/java -cp "$TOOLS/../../opendistro_security_ssl/*:$TOOLS/../*:$TOOLS/../deps/*:$OS_HOME/lib/*" \
+                org.opensearch.security.tools.Hasher -p "$OPENSEARCH_INITIAL_ADMIN_PASSWORD")
+              # Copy securityconfig to writable location, set admin hash
+              cp -r $OS_HOME/securityconfig /tmp/securityconfig
+              sed -i "s|ADMIN_HASH_PLACEHOLDER|${HASH}|" /tmp/securityconfig/internal_users.yml
+              # Run demo cert/config installation
+              bash $TOOLS/install_demo_configuration.sh -y -i -s
+              # Append network binding after demo config
+              echo "network.host: 0.0.0.0" >> $OS_HOME/config/opensearch.yml
+              echo "cluster.initial_cluster_manager_nodes: [\"$HOSTNAME\"]" >> $OS_HOME/config/opensearch.yml
+              # Start opensearch
+              $OS_HOME/bin/opensearch &
+              # Wait for startup, then apply security config with correct admin password
+              until curl -sk https://localhost:9200 2>/dev/null; do sleep 2; done
+              sleep 5
+              bash $TOOLS/securityadmin.sh \
+                -cd /tmp/securityconfig \
+                -icl -nhnv \
+                -cacert $OS_HOME/config/root-ca.pem \
+                -cert $OS_HOME/config/kirk.pem \
+                -key $OS_HOME/config/kirk-key.pem &
+              wait
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "2Gi"
+            limits:
+              cpu: "2"
+              memory: "4Gi"
+          volumeMounts:
+            - name: data
+              mountPath: /usr/share/opensearch/data
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: openrag-opensearch-data
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: openrag-opensearch-data
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: openrag-opensearch
+  labels:
+    app: openrag-opensearch
+spec:
+  type: ClusterIP
+  ports:
+    - name: http
+      port: 9200
+      targetPort: 9200
+    - name: transport
+      port: 9600
+      targetPort: 9600
+  selector:
+    app: openrag-opensearch

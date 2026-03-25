@@ -1,0 +1,93 @@
+# Docling Serve — document conversion service for OpenRAG ingestion
+#
+# Deploy this BEFORE installing the OpenRAG Helm chart.
+# Docling is not included in the Helm chart — it is a prerequisite.
+#
+# Usage:
+#   oc apply -f hack/docling.yaml -n <namespace>
+#
+# The Helm values should set:
+#   global.docling.host: openrag-docling
+#   global.docling.port: 5001
+#   langflow.doclingServeUrl: "http://openrag-docling:5001"
+#
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: openrag-docling
+  labels:
+    app: openrag-docling
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: openrag-docling
+  template:
+    metadata:
+      labels:
+        app: openrag-docling
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: docling
+          image: ghcr.io/docling-project/docling-serve:v1.5.0
+          args:
+            - "docling-serve"
+            - "run"
+            - "--host"
+            - "0.0.0.0"
+            - "--port"
+            - "5001"
+          ports:
+            - containerPort: 5001
+          env:
+            - name: OMP_NUM_THREADS
+              value: "4"
+            - name: DOCLING_SERVE_ENG_LOC_NUM_WORKERS
+              value: "1"
+            - name: DOCLING_SERVE_MAX_SYNC_WAIT
+              value: "600"
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+          resources:
+            requests:
+              cpu: "1"
+              memory: "4Gi"
+            limits:
+              cpu: "4"
+              memory: "16Gi"
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 5001
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 5001
+            initialDelaySeconds: 60
+            periodSeconds: 30
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: openrag-docling
+  labels:
+    app: openrag-docling
+spec:
+  type: ClusterIP
+  ports:
+    - name: http
+      port: 5001
+      targetPort: 5001
+  selector:
+    app: openrag-docling
